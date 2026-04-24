@@ -46,20 +46,20 @@ The evaluation uses the provided cover letter passage (329 words) describing cov
 
 ### 2.2 Comparison Table
 
-| Metric | CPG (T5-base fine-tuned) | LLM (Gemini 2.5 Flash Lite) | Ideal Range |
+| Metric | CPG (T5-base fine-tuned) | LLM (Gemini 2.5 Flash) | Ideal Range |
 |--------|:---:|:---:|:---:|
-| BLEU | **58.29** | 18.83 | 30–60 |
-| ROUGE-1 F1 | **0.834** | 0.595 | 0.4–0.7 |
-| ROUGE-2 F1 | **0.709** | 0.253 | 0.3–0.5 |
-| ROUGE-L F1 | **0.796** | 0.496 | 0.4–0.6 |
-| BERTScore F1 | **0.542** | 0.414 | > 0.5 |
-| Self-BLEU | 58.29 | **18.83** | < 60 |
-| Jaccard Similarity | 0.587 | **0.226** | 0.3–0.6 |
-| Lexical Diversity | 0.481 | **0.585** | > 0.5 |
-| Length Ratio | 1.258 | **1.128** | ≥ 0.80 |
-| Latency (ms) | 76,251 *(CPU)* | **3,081** | — |
+| BLEU | **67.32** | 25.03 | 30–60 |
+| ROUGE-1 F1 | **0.880** | 0.691 | 0.4–0.7 |
+| ROUGE-2 F1 | **0.769** | 0.379 | 0.3–0.5 |
+| ROUGE-L F1 | **0.845** | 0.582 | 0.4–0.6 |
+| BERTScore F1 | **0.677** | 0.470 | > 0.5 |
+| Self-BLEU | 67.32 | **25.03** | < 60 |
+| Jaccard Similarity | 0.640 | **0.326** | 0.3–0.6 |
+| Lexical Diversity | 0.505 | **0.592** | > 0.5 |
+| Length Ratio | **1.143** | 1.155 | ≥ 0.80 |
+| Latency (ms) | 62,932 *(CPU)* | **13,414** | — |
 
-> CPG latency measured on CPU. Expected ~5,000–8,000ms on T4 GPU (10–15× speedup).
+> CPG latency measured on CPU. Expected ~4,000–6,000ms on T4 GPU (10–15× speedup).
 
 ### 2.3 Sample Outputs
 
@@ -67,10 +67,10 @@ The evaluation uses the provided cover letter passage (329 words) describing cov
 > A cover letter is a formal document that accompanies your resume when you apply for a job. It serves as an introduction and provides additional context for your application.
 
 **CPG output:**
-> A cover letter is a formal document that accompanies, when you apply for. It serves as an introduction and provides additional context for your application. Here is a breakdown of its various aspects: Purpose The primary purpose of eliciting, or introducing, showcasing your resume to the hiring manager and to provide context for it.
+> A cover letter is a formal document that accompanies - when you apply for 'a job'. It serves as an introduction and provides additional context for your application. Here is a breakdown of its various aspects: Purpose The primary purpose of eliciting, or introducing, showcasing your resume to the hiring manager and to provide context for it.
 
-**LLM output (Gemini 2.5 Flash Lite):**
-> A cover letter functions as a formal piece of correspondence that is submitted alongside your curriculum vitae when pursuing employment opportunities. Its role is to initiate contact and furnish supplementary details concerning your application.
+**LLM output (Gemini 2.5 Flash):**
+> A cover letter is a formal piece of correspondence that accompanies your resume when you submit an application for employment. Its primary function is to introduce you as a candidate and to furnish additional context regarding your application.
 
 ### 2.4 Charts
 
@@ -112,9 +112,9 @@ Charts generated in `results/`:
 
 The evaluation reveals a **meaning preservation vs. lexical diversity trade-off**:
 
-- **CPG excels at meaning preservation:** Higher BERTScore, BLEU, and all ROUGE metrics — the fine-tuned T5 stays close to the original semantics, which is the primary requirement for a paraphrase.
-- **LLM excels at lexical diversity:** Far lower Jaccard similarity and higher lexical diversity — the LLM produces more "rewritten" outputs that read differently even if they mean the same thing.
-- **Latency:** LLM wins on latency only because it runs on a large remote server; CPG at ~76s on CPU becomes ~5–8s on GPU, making it competitive for offline deployment.
+- **CPG excels at meaning preservation:** Higher BERTScore (0.677 vs 0.470), BLEU, and all ROUGE metrics — the fine-tuned T5 stays close to the original semantics, which is the primary requirement for a paraphrase.
+- **LLM excels at lexical diversity:** Far lower Jaccard similarity (0.326 vs 0.640) and higher lexical diversity — the LLM produces more "rewritten" outputs that read differently while preserving meaning.
+- **Latency:** LLM API call takes 13s on this run; CPG at ~63s on CPU becomes ~4–6s on GPU, making it faster and fully offline for production deployment.
 
 ### When to use CPG vs LLM
 
