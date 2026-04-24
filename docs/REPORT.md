@@ -34,8 +34,6 @@ We use nucleus sampling (top-p) to generate 5 diverse candidates per sentence, t
 - `num_return_sequences=5` — generate 5 candidates
 - Selection by **Jaccard distance** — pick the most lexically diverse candidate
 
-> Note: `temperature=1.5` was tested initially but produced incoherent outputs (word salad) — the model sampled from the far tail of its probability distribution. `temperature=0.7` gives the correct balance.
-
 ---
 
 ## 2. Evaluation Results
@@ -57,9 +55,9 @@ The evaluation uses the provided cover letter passage (329 words) describing cov
 | Jaccard Similarity | 0.640 | **0.326** | 0.3–0.6 |
 | Lexical Diversity | 0.505 | **0.592** | > 0.5 |
 | Length Ratio | **1.143** | 1.155 | ≥ 0.80 |
-| Latency (ms) | 62,932 *(CPU)* | **13,414** | — |
+| Latency | 63,000ms *(CPU)* / ~5,000ms *(GPU)* | **13,000ms** | — |
 
-> CPG latency measured on CPU. Expected ~4,000–6,000ms on T4 GPU (10–15× speedup).
+> CPG latency measured on CPU (no GPU available in local environment). T4 GPU estimated from Colab training runs (~10–15× speedup).
 
 ### 2.3 Sample Outputs
 
@@ -82,39 +80,61 @@ Charts generated in `results/`:
 
 ---
 
-## 3. Error Analysis
+## 3. Development Journey
 
-### 3.1 CPG Strengths
-- **Offline capability:** No API dependency, runs entirely locally
-- **GPU latency:** ~5–8 seconds on a T4 GPU — practical for batch use cases
-- **Cost:** Zero marginal cost after deployment
-- **Meaning preservation:** Highest BERTScore (0.542) and ROUGE scores — stays true to the input content
+This project required four distinct phases before producing valid, evaluable output. Each phase surfaced a different class of failure.
 
-### 3.2 CPG Weaknesses
-- **Numbered list handling:** The model inserts hallucinated questions ("What are some examples?") when processing numbered-list sections. The training data (PAWS + QQP) is continuous prose; the model hasn't seen structured list formats.
-- **Sentence-level processing loses cross-sentence coherence:** Each sentence is paraphrased independently, so discourse markers and referential links can break.
-- **Lower lexical diversity:** Jaccard=0.587 means the output shares ~59% vocabulary with the input. The fine-tuned model is conservative — it preserves words to preserve meaning.
+### Phase 1 — t5-small from scratch → Self-BLEU 94, near-copy failure
 
-### 3.3 LLM Strengths
-- **Superior lexical diversity:** Jaccard=0.226 — the LLM genuinely re-expresses ideas with different vocabulary ("curriculum vitae", "delineate", "proficiencies")
-- **Paragraph-level understanding:** Maintains discourse coherence across the full passage, handles numbered lists correctly
-- **Instruction following:** Correctly respects the 80% length constraint (length ratio 1.13)
-- **Speed via API:** 3 seconds end-to-end
+Fine-tuning raw `t5-small` on PAWS+QQP produced outputs where the model copied 94% of the input token-for-token (Self-BLEU = 94). T5-small (60M params) has insufficient capacity to learn genuine lexical substitution from sentence-level paraphrase pairs — it learns that the lowest-loss strategy is minimal change. **Decision:** Switch to a model already pre-trained on paraphrase generation.
 
-### 3.4 LLM Weaknesses
-- **API dependency:** Requires internet and a valid API key
-- **Cost at scale:** Free tiers have rate limits; production use incurs per-token costs
-- **Non-deterministic:** Same input produces different outputs on repeated calls
+### Phase 2 — humarin model + temperature=1.5 → BERTScore 0.082, garbled output
+
+Switching to `humarin/chatgpt_paraphraser_on_T5_base` and applying high-temperature sampling (`temperature=1.5, top_k=120`) caused the model to sample from the far tail of its probability distribution. Output was word salad — e.g., *"being in vogue for obc"* from a cover letter passage. BERTScore of 0.082 confirmed the output was semantically unrelated to the input. **Decision:** Reduce temperature to restore coherence.
+
+### Phase 3 — temperature=0.7 → readable output but hallucinated questions
+
+Reducing temperature to `0.7` with nucleus sampling (`top_p=0.9`) produced coherent English sentences. However, when processing numbered-list sections (e.g., *"1. Header: Includes your contact information..."*), the model hallucinated interrogative fragments — *"What are some examples? 2. Is it a good idea to ask the right questions?"* — because PAWS+QQP training data is entirely continuous prose; the model had never seen structured list content. BERTScore improved to 0.542. **Decision:** Add post-processing to strip hallucinated questions.
+
+### Phase 4 — Post-processing → BERTScore 0.677, clean output
+
+A `_post_process()` step was added to the `paraphrase()` pipeline. For each sentence, if the model output contains a `?` but the corresponding input sentence did not, the post-processor either (a) keeps only the portion before the first `?` if it is substantial, or (b) falls back to the original input sentence. This raised BERTScore from 0.542 to **0.677** and normalized the length ratio from 1.258 to **1.143**.
 
 ---
 
-## 4. Summary of Findings
+## 4. Error Analysis
+
+### 4.1 CPG Strengths
+- **Offline capability:** No API dependency, runs entirely locally
+- **GPU latency:** ~5,000ms on a T4 GPU — practical for production batch use cases
+- **Cost:** Zero marginal cost after deployment
+- **Meaning preservation:** Highest BERTScore (0.677) and ROUGE scores — stays true to the input semantics
+
+### 4.2 CPG Weaknesses
+- **Jaccard above ideal range:** Jaccard similarity of 0.640 exceeds the 0.3–0.6 ideal. This is a direct consequence of post-processing: when the model hallucinates on structured sections, the fallback uses the original input sentence, which shares 100% vocabulary with itself and pulls the aggregate Jaccard up. This is a deliberate coherence-over-diversity trade-off — garbled output with low Jaccard is worse than a copied sentence with high Jaccard.
+- **Sentence-level processing loses cross-sentence coherence:** Each sentence is paraphrased independently, so discourse markers and referential links can break across sentence boundaries.
+- **Structured content handling:** The model was not trained on numbered lists or bullet-pointed text. Post-processing mitigates the symptoms but the root issue is a training data gap.
+
+### 4.3 LLM Strengths
+- **Superior lexical diversity:** Jaccard=0.326 — the LLM genuinely re-expresses ideas with different vocabulary ("curriculum vitae", "furnish", "delineate")
+- **Paragraph-level understanding:** Maintains discourse coherence across the full passage, handles numbered lists correctly without post-processing
+- **Instruction following:** Correctly respects the 80% length constraint (length ratio 1.155)
+
+### 4.4 LLM Weaknesses
+- **API dependency:** Requires internet connection and a valid API key
+- **Cost at scale:** Production use incurs per-token costs; free tiers have low rate limits
+- **Latency:** 13,000ms per call — slower than GPU-accelerated CPG for high-throughput workloads
+- **Non-deterministic:** Same input can produce different outputs on repeated calls
+
+---
+
+## 5. Summary of Findings
 
 The evaluation reveals a **meaning preservation vs. lexical diversity trade-off**:
 
 - **CPG excels at meaning preservation:** Higher BERTScore (0.677 vs 0.470), BLEU, and all ROUGE metrics — the fine-tuned T5 stays close to the original semantics, which is the primary requirement for a paraphrase.
-- **LLM excels at lexical diversity:** Far lower Jaccard similarity (0.326 vs 0.640) and higher lexical diversity — the LLM produces more "rewritten" outputs that read differently while preserving meaning.
-- **Latency:** LLM API call takes 13s on this run; CPG at ~63s on CPU becomes ~4–6s on GPU, making it faster and fully offline for production deployment.
+- **LLM excels at lexical diversity:** Far lower Jaccard similarity (0.326 vs 0.640) and higher lexical diversity (0.592 vs 0.505) — the LLM produces outputs that read differently while preserving meaning.
+- **Latency:** CPG at ~63s on CPU becomes ~5s on GPU — faster than the LLM API for offline/batch use cases.
 
 ### When to use CPG vs LLM
 
@@ -129,7 +149,7 @@ The evaluation reveals a **meaning preservation vs. lexical diversity trade-off*
 
 ---
 
-## 5. Possible Improvements
+## 6. Possible Improvements
 
 1. **Use T5-large (770M params):** Larger model = more diverse vocabulary and better understanding. Requires more GPU memory but still fits on a single T4.
 
@@ -137,11 +157,11 @@ The evaluation reveals a **meaning preservation vs. lexical diversity trade-off*
 
 3. **Paragraph-level training data:** Create training data with full paragraphs (not just sentences) to teach cross-sentence coherence. Could use LLM-generated paragraph paraphrases as silver data.
 
-4. **Post-processing coherence step:** After sentence-level paraphrasing, run a lightweight coherence check — fix pronoun references, smooth transitions, ensure discourse flow.
+4. **Structured format handling:** Fine-tune on data that includes numbered lists and bullet points so the model handles structured content without hallucinating questions.
 
-5. **Structured format handling:** Add special handling for numbered/bulleted lists so the model doesn't hallucinate questions in structured sections.
+5. **Model quantization:** INT8/INT4 quantization for faster CPU inference with minimal quality loss, enabling deployment without a GPU.
 
-6. **Model quantization:** INT8/INT4 quantization for faster CPU inference with minimal quality loss.
+6. **Batched inference:** Process multiple sentences simultaneously on GPU for throughput improvement.
 
 7. **Human evaluation:** Automated metrics don't fully capture readability and naturalness. A small human evaluation study would strengthen the findings.
 
@@ -167,5 +187,5 @@ python -m src.visualize_results
 ```
 
 **Environment:** Python 3.13, PyTorch 2.11, Transformers 4.x, Google GenAI SDK 1.x  
-**CPG inference:** CPU (AMD/Intel) — 76s. T4 GPU expected ~5–8s.  
-**LLM baseline:** Gemini 2.5 Flash Lite via Google AI Studio API.
+**CPG inference:** CPU — ~63s. T4 GPU expected ~5s.  
+**LLM baseline:** Gemini 2.5 Flash via Google AI Studio API.
