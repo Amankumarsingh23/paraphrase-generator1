@@ -52,8 +52,8 @@ def run_llm(text: str) -> dict:
         print(f"Model: {result['model_name']}")
 
         return result
-    except RuntimeError as e:
-        print(f"\nLLM unavailable: {e}")
+    except Exception as e:
+        print(f"\nLLM unavailable: {e.__class__.__name__}: {e}")
         print("Skipping LLM comparison. Set GEMINI_API_KEY or ANTHROPIC_API_KEY.")
         return None
 

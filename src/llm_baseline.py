@@ -66,6 +66,14 @@ class GeminiParaphraseGenerator(BaseLLMGenerator):
     Free tier — get API key at https://aistudio.google.com/apikey
     """
 
+    # Try models in order until one works (free tier quotas vary per model)
+    _FALLBACK_MODELS = [
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-8b",
+    ]
+
     def __init__(self, api_key: str = None):
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY", "")
         self.model_name = "gemini-2.0-flash"
@@ -81,15 +89,23 @@ class GeminiParaphraseGenerator(BaseLLMGenerator):
         client = self._get_client()
         prompt = f"{PARAPHRASE_PROMPT}\n\n{text}"
 
-        start_time = time.time()
-        response = client.models.generate_content(
-            model=self.model_name,
-            contents=prompt,
-        )
-        latency_ms = (time.time() - start_time) * 1000
+        last_error = None
+        for model in self._FALLBACK_MODELS:
+            try:
+                start_time = time.time()
+                response = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                )
+                latency_ms = (time.time() - start_time) * 1000
+                output_text = response.text.strip()
+                self.model_name = model
+                return self._build_result(text, output_text, latency_ms, model)
+            except Exception as e:
+                print(f"  [{model}] failed: {e.__class__.__name__} — trying next model...")
+                last_error = e
 
-        output_text = response.text.strip()
-        return self._build_result(text, output_text, latency_ms, self.model_name)
+        raise RuntimeError(f"All Gemini models exhausted quota. Last error: {last_error}")
 
 
 class ClaudeParaphraseGenerator(BaseLLMGenerator):
