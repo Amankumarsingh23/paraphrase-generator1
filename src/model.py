@@ -32,15 +32,15 @@ except LookupError:
 # Default model — can be overridden with a fine-tuned checkpoint path
 DEFAULT_MODEL = "humarin/chatgpt_paraphraser_on_T5_base"
 
-# Decoding hyperparameters (tuned for diversity, not conservative copying)
+# Nucleus sampling at temperature=0.7 — coherent and diverse without group beam search
+# (group beam search was moved to a broken custom_generate repo in transformers ≥4.50)
 DECODE_CONFIG = {
     "do_sample": True,
-    "temperature": 1.5,       # High temp = more diverse vocabulary choices
-    "top_k": 120,             # Wide top-k for variety
-    "top_p": 0.95,            # Nucleus sampling threshold
-    "no_repeat_ngram_size": 2,  # Prevent repeating bigrams within output
-    "num_return_sequences": 5,  # Generate 5 candidates, pick best
-    "max_length": 256,         # Per-sentence max
+    "temperature": 0.7,
+    "top_p": 0.9,
+    "no_repeat_ngram_size": 2,
+    "num_return_sequences": 5,
+    "max_length": 256,
 }
 
 
@@ -111,7 +111,7 @@ class CustomParaphraseGenerator:
         input_token_count = inputs["input_ids"].shape[1]
         min_length = max(10, int(input_token_count * 0.8))
 
-        # Generate multiple candidates with diverse sampling
+        # Generate multiple candidates, pick most diverse via Jaccard
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,

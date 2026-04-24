@@ -66,11 +66,9 @@ class GeminiParaphraseGenerator(BaseLLMGenerator):
     Free tier — get API key at https://aistudio.google.com/apikey
     """
 
-    # Try models in order until one works
     _FALLBACK_MODELS = [
         "models/gemini-2.5-flash",
-        "models/gemini-2.0-flash",
-        "models/gemini-2.0-flash-lite",
+        "models/gemini-2.5-flash-lite",
     ]
 
     def __init__(self, api_key: str = None):

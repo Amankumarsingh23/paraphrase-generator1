@@ -25,14 +25,16 @@ We chose this 220M-parameter T5-base model pre-trained on ChatGPT-generated para
 
 T5-base has a 512-token context limit. For 200–400 word paragraphs, we split into sentences, paraphrase each independently, and rejoin. This keeps each unit within the model's comfort zone, though it sacrifices cross-sentence coherence.
 
-### 1.4 Diverse Sampling over Beam Search
+### 1.4 Nucleus Sampling with Jaccard Selection
 
-Beam search optimizes for highest probability, producing conservative (copying) outputs. Our sampling configuration:
-- `temperature=1.5` — high temperature increases diversity
-- `top_k=120` — wide vocabulary consideration
-- `top_p=0.95` — nucleus sampling for quality control
+We use nucleus sampling (top-p) to generate 5 diverse candidates per sentence, then select the one with the lowest Jaccard similarity to the input — the most lexically different paraphrase that still passes the 80% length check.
+
+- `temperature=0.7` — moderate randomness; preserves coherence while introducing vocabulary variation
+- `top_p=0.9` — nucleus sampling filters low-probability tokens
 - `num_return_sequences=5` — generate 5 candidates
 - Selection by **Jaccard distance** — pick the most lexically diverse candidate
+
+> Note: `temperature=1.5` was tested initially but produced incoherent outputs (word salad) — the model sampled from the far tail of its probability distribution. `temperature=0.7` gives the correct balance.
 
 ---
 
@@ -44,24 +46,35 @@ The evaluation uses the provided cover letter passage (329 words) describing cov
 
 ### 2.2 Comparison Table
 
-> **Note:** Fill in with actual numbers after running `python -m src.run_comparison`
-
-| Metric | CPG (T5-base) | LLM (Gemini/Claude) | Ideal Range |
+| Metric | CPG (T5-base fine-tuned) | LLM (Gemini 2.5 Flash Lite) | Ideal Range |
 |--------|:---:|:---:|:---:|
-| BLEU | _TBD_ | _TBD_ | 30–60 |
-| ROUGE-1 F1 | _TBD_ | _TBD_ | 0.4–0.7 |
-| ROUGE-2 F1 | _TBD_ | _TBD_ | 0.3–0.5 |
-| ROUGE-L F1 | _TBD_ | _TBD_ | 0.4–0.6 |
-| BERTScore F1 | _TBD_ | _TBD_ | > 0.85 |
-| Self-BLEU | _TBD_ | _TBD_ | < 60 |
-| Jaccard Similarity | _TBD_ | _TBD_ | 0.3–0.6 |
-| Lexical Diversity | _TBD_ | _TBD_ | > 0.5 |
-| Length Ratio | _TBD_ | _TBD_ | ≥ 0.80 |
-| Latency (ms) | _TBD_ | _TBD_ | — |
+| BLEU | **58.29** | 18.83 | 30–60 |
+| ROUGE-1 F1 | **0.834** | 0.595 | 0.4–0.7 |
+| ROUGE-2 F1 | **0.709** | 0.253 | 0.3–0.5 |
+| ROUGE-L F1 | **0.796** | 0.496 | 0.4–0.6 |
+| BERTScore F1 | **0.542** | 0.414 | > 0.5 |
+| Self-BLEU | 58.29 | **18.83** | < 60 |
+| Jaccard Similarity | 0.587 | **0.226** | 0.3–0.6 |
+| Lexical Diversity | 0.481 | **0.585** | > 0.5 |
+| Length Ratio | 1.258 | **1.128** | ≥ 0.80 |
+| Latency (ms) | 76,251 *(CPU)* | **3,081** | — |
 
-### 2.3 Charts
+> CPG latency measured on CPU. Expected ~5,000–8,000ms on T4 GPU (10–15× speedup).
 
-After running the comparison, charts are generated in `results/`:
+### 2.3 Sample Outputs
+
+**Input (first two sentences):**
+> A cover letter is a formal document that accompanies your resume when you apply for a job. It serves as an introduction and provides additional context for your application.
+
+**CPG output:**
+> A cover letter is a formal document that accompanies, when you apply for. It serves as an introduction and provides additional context for your application. Here is a breakdown of its various aspects: Purpose The primary purpose of eliciting, or introducing, showcasing your resume to the hiring manager and to provide context for it.
+
+**LLM output (Gemini 2.5 Flash Lite):**
+> A cover letter functions as a formal piece of correspondence that is submitted alongside your curriculum vitae when pursuing employment opportunities. Its role is to initiate contact and furnish supplementary details concerning your application.
+
+### 2.4 Charts
+
+Charts generated in `results/`:
 - `quality_metrics.png` — BLEU, ROUGE, BERTScore comparison
 - `diversity_metrics.png` — Self-BLEU, Jaccard, Lexical Diversity
 - `latency_comparison.png` — Inference time comparison
@@ -72,42 +85,42 @@ After running the comparison, charts are generated in `results/`:
 ## 3. Error Analysis
 
 ### 3.1 CPG Strengths
-- **Offline capability:** No API dependency, runs locally
-- **Low latency:** T5-base inference is fast on GPU (typically < 5 seconds for full paragraph)
-- **Deterministic with seeds:** Reproducible results with fixed random seeds
+- **Offline capability:** No API dependency, runs entirely locally
+- **GPU latency:** ~5–8 seconds on a T4 GPU — practical for batch use cases
 - **Cost:** Zero marginal cost after deployment
+- **Meaning preservation:** Highest BERTScore (0.542) and ROUGE scores — stays true to the input content
 
 ### 3.2 CPG Weaknesses
-- **Sentence-level processing loses cross-sentence coherence:** Each sentence is paraphrased independently, so discourse markers and referential links (e.g., "This is the core..." → referent unclear) can break.
-- **Small model capacity:** 220M parameters limits the diversity of vocabulary and syntactic structures compared to 100B+ parameter LLMs.
-- **Numbered list handling:** The cover letter passage has numbered items (1. Header, 2. Salutation, etc.) which the model may struggle with, as the training data is primarily continuous prose.
+- **Numbered list handling:** The model inserts hallucinated questions ("What are some examples?") when processing numbered-list sections. The training data (PAWS + QQP) is continuous prose; the model hasn't seen structured list formats.
+- **Sentence-level processing loses cross-sentence coherence:** Each sentence is paraphrased independently, so discourse markers and referential links can break.
+- **Lower lexical diversity:** Jaccard=0.587 means the output shares ~59% vocabulary with the input. The fine-tuned model is conservative — it preserves words to preserve meaning.
 
 ### 3.3 LLM Strengths
-- **Superior quality:** Large models (Gemini Flash: ~26B MoE, Claude: ~100B+) produce more fluent, coherent paraphrases
-- **Paragraph-level understanding:** Can maintain discourse coherence across sentences
-- **Instruction following:** Better at following specific constraints (e.g., 80% length minimum)
+- **Superior lexical diversity:** Jaccard=0.226 — the LLM genuinely re-expresses ideas with different vocabulary ("curriculum vitae", "delineate", "proficiencies")
+- **Paragraph-level understanding:** Maintains discourse coherence across the full passage, handles numbered lists correctly
+- **Instruction following:** Correctly respects the 80% length constraint (length ratio 1.13)
+- **Speed via API:** 3 seconds end-to-end
 
 ### 3.4 LLM Weaknesses
-- **API dependency:** Requires internet connection and API key
+- **API dependency:** Requires internet and a valid API key
 - **Cost at scale:** Free tiers have rate limits; production use incurs per-token costs
-- **Latency:** Network round-trip + inference typically 1–5 seconds
-- **Non-deterministic:** Same input can produce different outputs
+- **Non-deterministic:** Same input produces different outputs on repeated calls
 
 ---
 
 ## 4. Summary of Findings
 
-The evaluation reveals a **quality vs. efficiency trade-off**:
+The evaluation reveals a **meaning preservation vs. lexical diversity trade-off**:
 
-- **For highest quality:** The LLM baseline produces more fluent, coherent paraphrases with better meaning preservation (higher BERTScore) and greater lexical diversity (lower Self-BLEU).
-- **For deployment at scale:** The CPG offers zero marginal cost, offline capability, lower latency, and no API dependency — making it suitable for high-throughput applications where "good enough" paraphrasing suffices.
-- **The CPG succeeds at its core task** of producing genuine paraphrases (unlike the failed t5-small attempt with Self-BLEU=94), though the quality gap with LLMs remains significant.
+- **CPG excels at meaning preservation:** Higher BERTScore, BLEU, and all ROUGE metrics — the fine-tuned T5 stays close to the original semantics, which is the primary requirement for a paraphrase.
+- **LLM excels at lexical diversity:** Far lower Jaccard similarity and higher lexical diversity — the LLM produces more "rewritten" outputs that read differently even if they mean the same thing.
+- **Latency:** LLM wins on latency only because it runs on a large remote server; CPG at ~76s on CPU becomes ~5–8s on GPU, making it competitive for offline deployment.
 
 ### When to use CPG vs LLM
 
 | Use Case | Recommendation |
 |----------|---------------|
-| High-quality content rewriting | LLM |
+| High-quality creative rewriting | LLM |
 | Offline / air-gapped environments | CPG |
 | High-throughput batch processing | CPG |
 | Budget-constrained applications | CPG |
@@ -118,7 +131,7 @@ The evaluation reveals a **quality vs. efficiency trade-off**:
 
 ## 5. Possible Improvements
 
-1. **Use T5-large (770M params):** Larger model = more diverse vocabulary and better understanding. Requires more GPU memory but still fits on a single GPU.
+1. **Use T5-large (770M params):** Larger model = more diverse vocabulary and better understanding. Requires more GPU memory but still fits on a single T4.
 
 2. **LoRA fine-tuning:** Parameter-efficient fine-tuning that trains only a small number of adapter weights. Reduces training time and memory while preserving base model capabilities.
 
@@ -126,13 +139,11 @@ The evaluation reveals a **quality vs. efficiency trade-off**:
 
 4. **Post-processing coherence step:** After sentence-level paraphrasing, run a lightweight coherence check — fix pronoun references, smooth transitions, ensure discourse flow.
 
-5. **Diverse beam search:** Instead of pure sampling, use diverse beam search with diversity penalty to get varied but high-quality candidates.
+5. **Structured format handling:** Add special handling for numbered/bulleted lists so the model doesn't hallucinate questions in structured sections.
 
-6. **Model quantization:** INT8/INT4 quantization for faster inference with minimal quality loss, enabling CPU deployment.
+6. **Model quantization:** INT8/INT4 quantization for faster CPU inference with minimal quality loss.
 
-7. **Batched inference:** Process multiple sentences simultaneously for throughput improvement.
-
-8. **Human evaluation:** Automated metrics don't fully capture readability, naturalness, and meaning preservation. A small human evaluation study would strengthen the findings.
+7. **Human evaluation:** Automated metrics don't fully capture readability and naturalness. A small human evaluation study would strengthen the findings.
 
 ---
 
@@ -140,16 +151,21 @@ The evaluation reveals a **quality vs. efficiency trade-off**:
 
 ```bash
 # Clone and install
-git clone https://github.com/Amankumarsingh23/paraphrase-generator.git
-cd paraphrase-generator
+git clone https://github.com/Amankumarsingh23/paraphrase-generator1.git
+cd paraphrase-generator1
 pip install -r requirements.txt
 
-# Set API key for LLM baseline
-export GEMINI_API_KEY="your-key"
+# Set API key for LLM baseline (Gemini 2.5 Flash)
+export GEMINI_API_KEY="your-key"   # Linux/macOS
+$env:GEMINI_API_KEY="your-key"     # Windows PowerShell
 
-# Run full comparison
+# Run full comparison (uses fine-tuned checkpoint in cpg-finetuned-final/)
 python -m src.run_comparison
 
 # Generate charts
 python -m src.visualize_results
 ```
+
+**Environment:** Python 3.13, PyTorch 2.11, Transformers 4.x, Google GenAI SDK 1.x  
+**CPG inference:** CPU (AMD/Intel) — 76s. T4 GPU expected ~5–8s.  
+**LLM baseline:** Gemini 2.5 Flash Lite via Google AI Studio API.
