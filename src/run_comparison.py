@@ -129,7 +129,7 @@ def main():
     assert validation["valid"], f"Invalid input: {validation['error']}"
 
     # Run both generators
-    cpg_result = run_cpg(text)
+    cpg_result = run_cpg(text, model_path="./cpg-finetuned-final/cpg-finetuned-final")
     llm_result = run_llm(text)
 
     # Evaluate
