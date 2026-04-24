@@ -1,0 +1,27 @@
+# Core ML
+torch>=2.0.0
+transformers>=4.35.0
+datasets>=2.14.0
+accelerate>=0.24.0
+sentencepiece>=0.1.99
+
+# Evaluation
+rouge-score>=0.1.2
+nltk>=3.8.1
+bert-score>=0.3.13
+sacrebleu>=2.3.1
+
+# API
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.5.0
+
+# LLM Baselines
+google-genai>=1.0.0
+anthropic>=0.39.0
+
+# Utilities
+numpy>=1.24.0
+pandas>=2.0.0
+matplotlib>=3.7.0
+tqdm>=4.65.0
